@@ -36,23 +36,62 @@ public class ATMClient {
              BufferedReader console = new BufferedReader(new InputStreamReader(System.in))) {
 
             System.out.println("已连接到ATM服务器 " + serverHost + ":" + serverPort);
-            System.out.print("请输入卡号: ");
-            System.out.flush();
-            String cardNo = console.readLine();
-            out.println("HELO " + cardNo);
-            String response = in.readLine();
-            if (!response.startsWith("500")) {
-                System.out.println("服务器错误: " + response);
+
+            // ---- 阶段1：卡号输入，最多重试3次 ----
+            final int MAX_RETRIES = 3;
+            String response = null;
+
+            for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                System.out.print("请输入卡号: ");
+                System.out.flush();
+                String cardNo = console.readLine();
+                if (cardNo == null) return;
+                out.println("HELO " + cardNo);
+                response = in.readLine();
+                if (response != null && response.startsWith("500")) {
+                    break; // 卡号有效，进入口令阶段
+                }
+                System.out.println("卡号无效: " + response);
+                if (attempt < MAX_RETRIES) {
+                    System.out.print("是否重试？(y/n): ");
+                    System.out.flush();
+                    String retry = console.readLine();
+                    if (retry == null || !retry.trim().equalsIgnoreCase("y")) {
+                        System.out.println("用户取消操作，退出。");
+                        return;
+                    }
+                }
+            }
+            if (response == null || !response.startsWith("500")) {
+                System.out.println("超过最大重试次数，退出。");
                 return;
             }
+
+            // ---- 阶段2：口令验证，最多重试3次 ----
             System.out.println("服务器要求验证口令: " + response);
-            System.out.print("请输入口令: ");
-            System.out.flush();
-            String passwd = console.readLine();
-            out.println("PASS " + passwd);
-            response = in.readLine();
-            if (!"525 OK!".equals(response)) {
+            for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                System.out.print("请输入口令: ");
+                System.out.flush();
+                String passwd = console.readLine();
+                if (passwd == null) return;
+                out.println("PASS " + passwd);
+                response = in.readLine();
+                if ("525 OK!".equals(response)) {
+                    break; // 认证成功
+                }
                 System.out.println("认证失败: " + response);
+                if (attempt < MAX_RETRIES) {
+                    System.out.print("是否重试？(y/n): ");
+                    System.out.flush();
+                    String retry = console.readLine();
+                    if (retry == null || !retry.trim().equalsIgnoreCase("y")) {
+                        System.out.println("用户取消操作，退出。");
+                        return;
+                    }
+                }
+            }
+            if (!"525 OK!".equals(response)) {
+                System.out.println("超过最大重试次数，退出。");
                 return;
             }
             System.out.println("认证成功！");
