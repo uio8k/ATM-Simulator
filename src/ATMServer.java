@@ -2,6 +2,8 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 
 /**
  * ATM服务器端（支持端口号配置）
@@ -14,6 +16,9 @@ public class ATMServer {
     private static final Map<String, String> userPasswords = new ConcurrentHashMap<>();
     // 存储用户余额: cardNo -> balance
     private static final Map<String, Double> userBalances = new ConcurrentHashMap<>();
+    // 日志文件
+    private static final String LOG_FILE = "atm-server.log";
+    private static final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
     public static void main(String[] args) {
         // 解析端口号
@@ -31,8 +36,9 @@ public class ATMServer {
         }
 
         loadUserData();
+        log("ATM服务器启动，监听端口 " + port);
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("ATM服务器已启动，监听端口 " + port);
+            log("ATM服务器已就绪，等待连接...");
             ExecutorService pool = Executors.newCachedThreadPool();
             while (true) {
                 Socket clientSocket = serverSocket.accept();
@@ -54,9 +60,9 @@ public class ATMServer {
                     userPasswords.put(parts[0], parts[1]);
                 }
             }
-            System.out.println("已加载 " + userPasswords.size() + " 个用户账号");
+            log("已加载 " + userPasswords.size() + " 个用户账号");
         } catch (IOException e) {
-            System.err.println("读取users.txt失败，将使用空数据集");
+            log("读取users.txt失败，将使用空数据集");
         }
 
         // 加载余额
@@ -70,9 +76,21 @@ public class ATMServer {
                     } catch (NumberFormatException ignored) {}
                 }
             }
-            System.out.println("已加载 " + userBalances.size() + " 个余额记录");
+            log("已加载 " + userBalances.size() + " 个余额记录");
         } catch (IOException e) {
-            System.err.println("读取balances.txt失败，将使用空数据集");
+            log("读取balances.txt失败，将使用空数据集");
+        }
+    }
+
+    /** 写入日志 */
+    private static synchronized void log(String msg) {
+        String timestamp = sdf.format(new Date());
+        String line = "[" + timestamp + "] " + msg;
+        System.out.println(line);
+        try (PrintWriter pw = new PrintWriter(new FileWriter(LOG_FILE, true))) {
+            pw.println(line);
+        } catch (IOException e) {
+            System.err.println("写入日志失败: " + e.getMessage());
         }
     }
 
@@ -83,18 +101,21 @@ public class ATMServer {
                 pw.printf("%s %.2f%n", entry.getKey(), entry.getValue());
             }
         } catch (IOException e) {
-            System.err.println("保存balances.txt失败: " + e.getMessage());
+            log("保存balances.txt失败: " + e.getMessage());
         }
     }
 
     /** 处理单个客户端连接的线程 */
     private static class ClientHandler implements Runnable {
         private final Socket socket;
+        private final String clientAddr;
         private String currentCard = null;
         private boolean authenticated = false;
 
         ClientHandler(Socket socket) {
             this.socket = socket;
+            this.clientAddr = socket.getInetAddress().getHostAddress() + ":" + socket.getPort();
+            log("客户端已连接: " + clientAddr);
         }
 
         @Override
@@ -103,17 +124,17 @@ public class ATMServer {
                  PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
                 String line;
                 while ((line = in.readLine()) != null) {
-                    System.out.println("收到: " + line);
+                    log("[客户端 " + clientAddr + "] 收到: " + line);
                     String response = processCommand(line.trim());
                     out.println(response);
-                    System.out.println("回复: " + response);
+                    log("[客户端 " + clientAddr + "] 回复: " + response);
                     if (response.equals("BYE")) break;
                 }
             } catch (IOException e) {
-                System.err.println("客户端连接异常: " + e.getMessage());
+                log("客户端连接异常 [" + clientAddr + "]: " + e.getMessage());
             } finally {
                 try { socket.close(); } catch (IOException ignored) {}
-                System.out.println("客户端断开，卡号: " + (currentCard == null ? "未知" : currentCard));
+                log("客户端断开 [" + clientAddr + "]，卡号: " + (currentCard == null ? "未知" : currentCard));
             }
         }
 
